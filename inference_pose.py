@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import cv2
-from moviepy.editor import VideoFileClip
+#from moviepy.editor import VideoFileClip
 
 import numpy as np
 import torch
@@ -202,18 +202,10 @@ def main(args):
     pose_encoder_kwargs = model_configs['pose_encoder_kwargs']
     attention_processor_kwargs = model_configs['attention_processor_kwargs']
 
-    print(f'Constructing pipeline')
-    pipeline = get_pipeline(args.ori_model_path, args.unet_subfolder, args.image_lora_rank, args.image_lora_ckpt,
-                            unet_additional_kwargs, args.motion_module_ckpt, pose_encoder_kwargs, attention_processor_kwargs,
-                            noise_scheduler_kwargs, args.pose_adaptor_ckpt,
-                            args.personalized_base_model, f"cuda:{gpu_id}")
-    device = torch.device(f"cuda:{gpu_id}")
-    print('Done')
-
     eval_listdir = [x for x in os.listdir(args.eval_datadir)]
     filtered_eval_listdir = eval_listdir[:1000]
 
-    for idx, listdir in tqdm(enumerate(filtered_eval_listdir)):
+    for idx, listdir in enumerate(filtered_eval_listdir):
         filedir = '{}/{}'.format(args.eval_datadir, listdir)
         eval_file = [x for x in os.listdir(filedir)]
 
@@ -223,9 +215,12 @@ def main(args):
         
         video_file = '{}/{}'.format(filedir, eval_file[0])
         cap = cv2.VideoCapture(video_file)
+        if not cap.isOpened():
+            print("Error: Could not open video file.")
+            exit()
         ret, frame = cap.read()
         original_pose_height = frame.shape[0]
-        original_pose_weight = frame.shape[1]
+        original_pose_width = frame.shape[1]
         
         # Target pose1
         print('Loading Target Pose 1 K, R, t matrix')
@@ -256,32 +251,10 @@ def main(args):
         c2ws = get_relative_pose(cam_params)
         c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
 
+        import pdb; pdb.set_trace()
         # Intrinsic with shape 3x3
         #K1 = torch.zero((16, 3, 3))
         #K1[:, 0, 0] = 
-        
-
-        plucker_embedding = ray_condition(K, c2ws, args.image_height, args.image_width, device='cpu')[0].permute(0, 3, 1, 2).contiguous()  # V, 6, H, W
-        plucker_embedding = plucker_embedding[None].to(device)  # B V 6 H W
-        plucker_embedding = rearrange(plucker_embedding, "b f c h w -> b c f h w")
-
-        generator = torch.Generator(device=device)
-        generator.manual_seed(42)
-    
-        sample = pipeline(
-            prompt=caption,
-            #negative_prompt=negative_prompts[local_idx] if negative_prompts is not None else None,
-            pose_embedding=plucker_embedding,
-            video_length=args.video_length,
-            height=args.image_height,
-            width=args.image_width,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            generator=generator,
-        ).videos  # [1, 3, f, h, w]
-        save_name = "_".join(caption.split(" ")) + '_pose1_'
-        save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
-        save_videos_jpg(sample, f"{image_pth}", save_name)
 
         # Target pose 2
         print('Loading Target Pose 2 K, R, t matrix')
@@ -293,7 +266,7 @@ def main(args):
         cam_params = [[float(x) for x in pose] for pose in poses]
         cam_params = [Camera(cam_param) for cam_param in cam_params]
         sample_wh_ratio = args.image_width / args.image_height
-        pose_wh_ratio = args.original_pose_width / args.original_pose_height
+        pose_wh_ratio = original_pose_width / original_pose_height
         if pose_wh_ratio > sample_wh_ratio:
             resized_ori_w = args.image_height * pose_wh_ratio
             for cam_param in cam_params:
@@ -314,21 +287,6 @@ def main(args):
         plucker_embedding = ray_condition(K, c2ws, args.image_height, args.image_width, device='cpu')[0].permute(0, 3, 1, 2).contiguous()  # V, 6, H, W
         plucker_embedding = plucker_embedding[None].to(device)  # B V 6 H W
         plucker_embedding = rearrange(plucker_embedding, "b f c h w -> b c f h w")
-
-        sample = pipeline(
-            prompt=caption,
-            #negative_prompt=negative_prompts[local_idx] if negative_prompts is not None else None,
-            pose_embedding=plucker_embedding,
-            video_length=args.video_length,
-            height=args.image_height,
-            width=args.image_width,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            generator=generator,
-        ).videos  # [1, 3, f, h, w]
-        save_name = "_".join(caption.split(" ")) + '_pose2_'
-        save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
-        save_videos_jpg(sample, f"{image_pth}", save_name)
 
 
 if __name__ == '__main__':
