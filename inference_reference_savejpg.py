@@ -203,10 +203,9 @@ def main(args):
     attention_processor_kwargs = model_configs['attention_processor_kwargs']
 
     eval_listdir = [x for x in os.listdir(args.eval_datadir)]
-    filtered_eval_listdir = eval_listdir[:10]
+    filtered_eval_listdir = eval_listdir[:1000]
 
     sample_pairs = []
-    
     for idx, listdir in enumerate(filtered_eval_listdir):
         filedir = '{}/{}'.format(args.eval_datadir, listdir)
         eval_file = [x for x in os.listdir(filedir)]
@@ -214,160 +213,75 @@ def main(args):
         #Target video base path
         base_path = filedir
 
-        text_prompt_file = '{}/text.txt'.format(filedir)
+        text_prompt_file = '{}/{}'.format(filedir, eval_file[-1])
         with open(text_prompt_file, 'r') as f:
             caption = f.readlines()[0]
         
-        video_file = '{}/source_video.mp4'.format(filedir)
+        video_file = '{}/target_1_video.mp4'.format(filedir)
         cap = cv2.VideoCapture(video_file)
         if not cap.isOpened():
             print("Error: Could not open video file.")
             exit()
-        ret, frame = cap.read()
-        original_pose_height = frame.shape[0]
-        original_pose_width = frame.shape[1]
-        print(original_pose_height)
-        print(original_pose_width)
         
-        # Target pose1
-        print('Loading Target Pose 1 K, R, t matrix')
-        target_pose1 = '{}/target_poses1.txt'.format(filedir)
-        with open(target_pose1, 'r') as f:
-            poses = f.readlines()
-        poses = [pose.strip().split(' ') for pose in poses[1:]]
-
-        cam_params = [[float(x) for x in pose] for pose in poses]
-        cam_params = [Camera(cam_param) for cam_param in cam_params]
+        frame_number = 0
         
-        sample_wh_ratio = args.image_width / args.image_height
-        #sample_wh_ratio = original_pose_width / original_pose_height
-        #pose_wh_ratio = original_pose_width / original_pose_height
-        pose_wh_ratio = args.original_pose_width / args.original_pose_height
-        if pose_wh_ratio > sample_wh_ratio:
-            resized_ori_w = args.image_height * pose_wh_ratio
-            #resized_ori_w = original_pose_height * pose_wh_ratio
-            for cam_param in cam_params:
-                cam_param.fx = resized_ori_w * cam_param.fx / args.image_width
-                #cam_param.fx = resized_ori_w * cam_param.fx / original_pose_width
-        else:
-            resized_ori_h = args.image_width / pose_wh_ratio
-            #resized_ori_h = original_pose_width / pose_wh_ratio
-            for cam_param in cam_params:
-                cam_param.fy = resized_ori_h * cam_param.fy / args.image_height
-                #cam_param.fy = resized_ori_h * cam_param.fy / original_pose_height
-        intrinsic = np.asarray([[cam_param.fx * args.image_width,
-                                cam_param.fy * args.image_height,
-                                cam_param.cx * args.image_width,
-                                cam_param.cy * args.image_height]
-                                for cam_param in cam_params], dtype=np.float32)
-        # intrinsic = np.asarray([[cam_param.fx * original_pose_width,
-        #                         cam_param.fy * original_pose_height,
-        #                         cam_param.cx * original_pose_width,
-        #                         cam_param.cy * original_pose_height]
-        #                         for cam_param in cam_params], dtype=np.float32)
+        # Read and save each frame as a JPG file
+        while True:
+            ret, frame = cap.read()
+            
+            # If the frame was not grabbed, break the loop
+            if not ret:
+                print("End of video reached.")
+                break
+            
+            # Construct the filename for each frame (e.g., frame_0001.jpg)
+            #resized_frame = cv2.resize(frame, (args.image_width, args.image_height))
+            resized_frame = frame
+            frame_filename = os.path.join('/hub_data1/dogyun/reference_video/', f'{listdir}_target_1_video_frame_{frame_number:04d}.jpg')
+            
+            # Save the frame as a JPG file
+            cv2.imwrite(frame_filename, resized_frame)
+            
+            # Print out the saved frame for feedback
+            print(f"Saved: {frame_filename}")
 
-        K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
-        c2ws = get_relative_pose(cam_params)
-        c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
+            # Increment the frame counter
+            frame_number += 1
+        # Release the video capture object
+        cap.release()
 
-        #c2ws_1 = c2ws.clone()
-
-        c2ws_1 = cam_params
-
-        # Intrinsic with shape 3x3
-        K1 = torch.zeros((K.shape[1], 3, 3))
-        K1[:, 0, 0] = K[0, :, 0]
-        K1[:, 1, 1] = K[0, :, 1]
-        K1[:, 0, 2] = K[0, :, 2]
-        K1[:, 1, 2] = K[0, :, 3]
-        K1[:, 2, 2] = 1.
-
-        # Target pose 2
-        print('Loading Target Pose 2 K, R, t matrix')
-        target_pose2 = '{}/{}'.format(filedir, eval_file[6])
-        with open(target_pose2, 'r') as f:
-            poses = f.readlines()
-        poses = [pose.strip().split(' ') for pose in poses[1:]]
-
-        cam_params = [[float(x) for x in pose] for pose in poses]
-        cam_params = [Camera(cam_param) for cam_param in cam_params]
+        video_file = '{}/target_2_video.mp4'.format(filedir)
+        cap = cv2.VideoCapture(video_file)
+        if not cap.isOpened():
+            print("Error: Could not open video file.")
+            exit()
         
-        #sample_wh_ratio = args.image_width / args.image_height
-        sample_wh_ratio = original_pose_width / original_pose_height
-        #pose_wh_ratio = original_pose_width / original_pose_height
-        pose_wh_ratio = args.original_pose_width / args.original_pose_height
-        if pose_wh_ratio > sample_wh_ratio:
-            #resized_ori_w = args.image_height * pose_wh_ratio
-            resized_ori_w = original_pose_height * pose_wh_ratio
-            for cam_param in cam_params:
-                #cam_param.fx = resized_ori_w * cam_param.fx / args.image_width
-                cam_param.fx = resized_ori_w * cam_param.fx / original_pose_width
-        else:
-            #resized_ori_h = args.image_width / pose_wh_ratio
-            resized_ori_h = original_pose_width / pose_wh_ratio
-            for cam_param in cam_params:
-                #cam_param.fy = resized_ori_h * cam_param.fy / args.image_height
-                cam_param.fy = resized_ori_h * cam_param.fy / original_pose_height
-        # intrinsic = np.asarray([[cam_param.fx * args.image_width,
-        #                         cam_param.fy * args.image_height,
-        #                         cam_param.cx * args.image_width,
-        #                         cam_param.cy * args.image_height]
-        #                         for cam_param in cam_params], dtype=np.float32)
-        intrinsic = np.asarray([[cam_param.fx * original_pose_width,
-                                cam_param.fy * original_pose_height,
-                                cam_param.cx * original_pose_width,
-                                cam_param.cy * original_pose_height]
-                                for cam_param in cam_params], dtype=np.float32)
+        frame_number = 0
+        
+        # Read and save each frame as a JPG file
+        while True:
+            ret, frame = cap.read()
+            
+            # If the frame was not grabbed, break the loop
+            if not ret:
+                print("End of video reached.")
+                break
+            
+            # Construct the filename for each frame (e.g., frame_0001.jpg)
+            #resized_frame = cv2.resize(frame, (args.image_width, args.image_height))
+            resized_frame = frame
+            frame_filename = os.path.join('/hub_data1/dogyun/reference_video/', f'{listdir}_target_2_video_frame_{frame_number:04d}.jpg')
+            
+            # Save the frame as a JPG file
+            cv2.imwrite(frame_filename, resized_frame)
+            
+            # Print out the saved frame for feedback
+            print(f"Saved: {frame_filename}")
 
-        K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
-        #c2ws = get_relative_pose(cam_params)
-        #c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
-
-        #c2ws_2 = c2ws.clone()
-        c2ws_2 = cam_params
-
-        K2 = torch.zeros((K.shape[1], 3, 3))
-        K2[:, 0, 0] = K[0, :, 0]
-        K2[:, 1, 1] = K[0, :, 1]
-        K2[:, 0, 2] = K[0, :, 2]
-        K2[:, 1, 2] = K[0, :, 3]
-        K2[:, 2, 2] = 1.
-
-
-        per_video = True
-        if per_video:
-            save_name = "_".join(caption.split(" ")) + '_pose1_'
-            save_name = save_name.replace(',', '')
-            #base_path_target2 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_0000.jpg')
-            base_path_target2 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_0000.jpg')
-            K1_target2 = K1[0].reshape(-1)
-            c2ws_0 = c2ws_1[0].c2w_mat.reshape(-1)
-            for frame_num in range(1,K.shape[1]):
-                line_pairs = []
-                #base_path_target1 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_{frame_num:04d}.jpg')
-                base_path_target1 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_{frame_num:04d}.jpg')
-                line_pairs.append(base_path_target2)
-                line_pairs.append(base_path_target1)
-                K1_f = K1[frame_num].reshape(-1)
-                for k2_f in K1_target2:
-                    line_pairs.append(str(k2_f.item()))
-                for k1_f in K1_f:
-                    line_pairs.append(str(k1_f.item()))
-                for c2w_f in c2ws_0:
-                    line_pairs.append(str(c2w_f.item()))
-                c2ws_f = c2ws_1[frame_num].c2w_mat.reshape(-1)
-                for c2w_f in c2ws_f:
-                    line_pairs.append(str(c2w_f.item()))
-                
-                # relative pose
-                c2ws_f = c2ws[0][frame_num].reshape(-1)
-                for c2w_f in c2ws_f:
-                    line_pairs.append(str(c2w_f.item()))
-
-                with open('/hub_data1/dogyun/pairs/pervideo_cameractrl_i2v_pairs_with_gt.txt', "a") as f:
-                    f.write(" ".join(line_pairs) + "\n")
-
-                #import pdb; pdb.set_trace()
+            # Increment the frame counter
+            frame_number += 1
+        # Release the video capture object
+        cap.release()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

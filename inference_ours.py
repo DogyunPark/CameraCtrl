@@ -217,11 +217,11 @@ def main(args):
         filedir = '{}/{}'.format(args.eval_datadir, listdir)
         eval_file = [x for x in os.listdir(filedir)]
 
-        text_prompt_file = '{}/{}'.format(filedir, eval_file[-1])
+        text_prompt_file = '{}/text.txt'.format(filedir)
         with open(text_prompt_file, 'r') as f:
             caption = f.readlines()[0]
         
-        video_file = '{}/{}'.format(filedir, eval_file[0])
+        video_file = '{}/source_video.mp4'.format(filedir)
         cap = cv2.VideoCapture(video_file)
         ret, frame = cap.read()
         original_pose_height = frame.shape[0]
@@ -229,7 +229,7 @@ def main(args):
         
         # Target pose1
         print('Loading Target Pose 1 K, R, t matrix')
-        target_pose1 = '{}/{}'.format(filedir, eval_file[3])
+        target_pose1 = '{}/target_poses1.txt'.format(filedir)
         with open(target_pose1, 'r') as f:
             poses = f.readlines()
         poses = [pose.strip().split(' ') for pose in poses[1:]]
@@ -280,12 +280,13 @@ def main(args):
             generator=generator,
         ).videos  # [1, 3, f, h, w]
         save_name = "_".join(caption.split(" ")) + '_pose1_'
+        save_name = save_name.replace(',', '')
         save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
         save_videos_jpg(sample, f"{image_pth}", save_name)
 
         # Target pose 2
         print('Loading Target Pose 2 K, R, t matrix')
-        target_pose2 = '{}/{}'.format(filedir, eval_file[6])
+        target_pose2 = '{}/target_poses2.txt'.format(filedir)
         with open(target_pose2, 'r') as f:
             poses = f.readlines()
         poses = [pose.strip().split(' ') for pose in poses[1:]]
@@ -327,6 +328,7 @@ def main(args):
             generator=generator,
         ).videos  # [1, 3, f, h, w]
         save_name = "_".join(caption.split(" ")) + '_pose2_'
+        save_name = save_name.replace(',', '')
         save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
         save_videos_jpg(sample, f"{image_pth}", save_name)
 
