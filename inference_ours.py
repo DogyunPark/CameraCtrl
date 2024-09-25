@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import cv2
-from moviepy.editor import VideoFileClip
 
 import numpy as np
 import torch
@@ -225,7 +224,7 @@ def main(args):
         cap = cv2.VideoCapture(video_file)
         ret, frame = cap.read()
         original_pose_height = frame.shape[0]
-        original_pose_weight = frame.shape[1]
+        original_pose_width = frame.shape[1]
         
         # Target pose1
         print('Loading Target Pose 1 K, R, t matrix')
@@ -237,7 +236,7 @@ def main(args):
         cam_params = [[float(x) for x in pose] for pose in poses]
         cam_params = [Camera(cam_param) for cam_param in cam_params]
         sample_wh_ratio = args.image_width / args.image_height
-        pose_wh_ratio = original_pose_width / original_pose_height
+        pose_wh_ratio = args.original_pose_width / args.original_pose_height
         if pose_wh_ratio > sample_wh_ratio:
             resized_ori_w = args.image_height * pose_wh_ratio
             for cam_param in cam_params:

@@ -203,7 +203,7 @@ def main(args):
     attention_processor_kwargs = model_configs['attention_processor_kwargs']
 
     eval_listdir = [x for x in os.listdir(args.eval_datadir)]
-    filtered_eval_listdir = eval_listdir[:10]
+    filtered_eval_listdir = eval_listdir[:1000]
 
     sample_pairs = []
     
@@ -338,14 +338,14 @@ def main(args):
         if per_video:
             save_name = "_".join(caption.split(" ")) + '_pose1_'
             save_name = save_name.replace(',', '')
-            #base_path_target2 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_0000.jpg')
-            base_path_target2 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_0000.jpg')
+            base_path_target2 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_0000.jpg')
+            #base_path_target2 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_0000.jpg')
             K1_target2 = K1[0].reshape(-1)
             c2ws_0 = c2ws_1[0].c2w_mat.reshape(-1)
             for frame_num in range(1,K.shape[1]):
                 line_pairs = []
-                #base_path_target1 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_{frame_num:04d}.jpg')
-                base_path_target1 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_{frame_num:04d}.jpg')
+                base_path_target1 = os.path.join('/hub_data1/dogyun/reference_video', f'{listdir}_target_1_video_frame_{frame_num:04d}.jpg')
+                #base_path_target1 = os.path.join('/hub_data1/dogyun/cameractrl_i2v_video', f'{save_name}frame_{frame_num:04d}.jpg')
                 line_pairs.append(base_path_target2)
                 line_pairs.append(base_path_target1)
                 K1_f = K1[frame_num].reshape(-1)
@@ -364,7 +364,8 @@ def main(args):
                 for c2w_f in c2ws_f:
                     line_pairs.append(str(c2w_f.item()))
 
-                with open('/hub_data1/dogyun/pairs/pervideo_cameractrl_i2v_pairs_with_gt.txt', "a") as f:
+                #with open('/hub_data1/dogyun/pairs/pervideo_cameractrl_i2v_pairs_with_gt.txt', "a") as f:
+                with open('/hub_data1/dogyun/pairs/pervideo_reference_pairs_with_gt.txt', "a") as f:                    
                     f.write(" ".join(line_pairs) + "\n")
 
                 #import pdb; pdb.set_trace()
