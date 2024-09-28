@@ -3,6 +3,7 @@ import json
 import os
 import torch
 import numpy as np
+import cv2
 from tqdm import tqdm
 from omegaconf import OmegaConf
 from PIL import Image
@@ -14,7 +15,7 @@ from packaging import version as pver
 from cameractrl.pipelines.pipeline_animation import StableVideoDiffusionPipelinePoseCond
 from cameractrl.models.unet import UNetSpatioTemporalConditionModelPoseCond
 from cameractrl.models.pose_adaptor import CameraPoseEncoder
-from cameractrl.utils.util import save_videos_grid
+from cameractrl.utils.util import save_videos_grid, save_videos_jpg
 
 
 class Camera(object):
@@ -54,7 +55,7 @@ def custom_meshgrid(*args):
         return torch.meshgrid(*args, indexing='ij')
 
 
-def get_relative_pose(cam_params, zero_first_frame_scale):
+def get_relative_pose(cam_params, zero_first_frame_scale=True):
     abs_w2cs = [cam_param.w2c_mat for cam_param in cam_params]
     abs_c2ws = [cam_param.c2w_mat for cam_param in cam_params]
     source_cam_c2w = abs_c2ws[0]
@@ -145,10 +146,14 @@ def get_pipeline(ori_model_path, unet_subfolder, down_block_types, up_block_type
 
 
 def main(args):
-    os.makedirs(os.path.join(args.out_root, 'generated_videos'), exist_ok=True)
-    os.makedirs(os.path.join(args.out_root, 'reference_images'), exist_ok=True)
+    os.makedirs(args.out_root, exist_ok=True)
+    video_pth = '{}/video'.format(args.out_root)
+    image_pth = '{}/image'.format(args.out_root)
+    os.makedirs(video_pth, exist_ok=True)
+    os.makedirs(image_pth, exist_ok=True)
+
     rank = args.local_rank
-    setup_for_distributed(rank == 0)
+    #setup_for_distributed(rank == 0)
     gpu_id = rank % torch.cuda.device_count()
     model_configs = OmegaConf.load(args.model_config)
     device = f"cuda:{gpu_id}"
@@ -158,52 +163,65 @@ def main(args):
                             model_configs['attention_processor_kwargs'], args.pose_adaptor_ckpt, args.enable_xformers, device)
     print('Done')
 
-    print('Loading K, R, t matrix')
-    with open(args.trajectory_file, 'r') as f:
-        poses = f.readlines()
-    poses = [pose.strip().split(' ') for pose in poses[1:]]
-    cam_params = [[float(x) for x in pose] for pose in poses]
-    cam_params = [Camera(cam_param) for cam_param in cam_params]
 
-    sample_wh_ratio = args.image_width / args.image_height
-    pose_wh_ratio = args.original_pose_width / args.original_pose_height
-    if pose_wh_ratio > sample_wh_ratio:
-        resized_ori_w = args.image_height * pose_wh_ratio
-        for cam_param in cam_params:
-            cam_param.fx = resized_ori_w * cam_param.fx / args.image_width
-    else:
-        resized_ori_h = args.image_width / pose_wh_ratio
-        for cam_param in cam_params:
-            cam_param.fy = resized_ori_h * cam_param.fy / args.image_height
-    intrinsic = np.asarray([[cam_param.fx * args.image_width,
-                             cam_param.fy * args.image_height,
-                             cam_param.cx * args.image_width,
-                             cam_param.cy * args.image_height]
-                            for cam_param in cam_params], dtype=np.float32)
-    K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
-    c2ws = get_relative_pose(cam_params, zero_first_frame_scale=True)
-    c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
-    plucker_embedding = ray_condition(K, c2ws, args.image_height, args.image_width, device='cpu')       # b f h w 6
-    plucker_embedding = plucker_embedding.permute(0, 1, 4, 2, 3).contiguous().to(device=device)
+    eval_listdir = [x for x in os.listdir(args.eval_datadir)]
+    filtered_eval_listdir = eval_listdir[:250]
 
-    prompt_dict = json.load(open(args.prompt_file, 'r'))
-    prompt_images = prompt_dict['image_paths']
-    prompt_captions = prompt_dict['captions']
-    N = int(len(prompt_images) // args.n_procs)
-    remainder = int(len(prompt_images) % args.n_procs)
-    prompts_per_gpu = [N + 1 if gpu_id < remainder else N for gpu_id in range(args.n_procs)]
-    low_idx = sum(prompts_per_gpu[:gpu_id])
-    high_idx = low_idx + prompts_per_gpu[gpu_id]
-    prompt_images = prompt_images[low_idx: high_idx]
-    prompt_captions = prompt_captions[low_idx: high_idx]
-    print(f"rank {rank} / {torch.cuda.device_count()}, number of prompts: {len(prompt_images)}")
+    for idx, listdir in tqdm(enumerate(filtered_eval_listdir)):
+        filedir = '{}/{}'.format(args.eval_datadir, listdir)
+        eval_file = [x for x in os.listdir(filedir)]
 
-    generator = torch.Generator(device=device)
-    generator.manual_seed(42)
+        text_prompt_file = '{}/text.txt'.format(filedir)
+        with open(text_prompt_file, 'r') as f:
+            caption = f.readlines()[0]
+        
+        video_file = '{}/source_video.mp4'.format(filedir)
+        cap = cv2.VideoCapture(video_file)
+        ret, frame = cap.read()
+        original_pose_height = frame.shape[0]
+        original_pose_width = frame.shape[1]
 
-    for prompt_image, prompt_caption in tqdm(zip(prompt_images, prompt_captions)):
-        save_name = "_".join(prompt_caption.split(" "))
-        condition_image = Image.open(prompt_image)
+        image_file = '{}/image_15.jpg'.format(filedir)
+        condition_image = Image.open(image_file)
+        
+        # Target pose1
+        print('Loading Target Pose 1 K, R, t matrix')
+        target_pose1 = '{}/target_poses1.txt'.format(filedir)
+        with open(target_pose1, 'r') as f:
+            poses = f.readlines()
+        poses = [pose.strip().split(' ') for pose in poses[1:]]
+
+        cam_params = [[float(x) for x in pose] for pose in poses]
+        cam_params = [Camera(cam_param) for cam_param in cam_params]
+        sample_wh_ratio = args.image_width / args.image_height
+        pose_wh_ratio = args.original_pose_width / args.original_pose_height
+        if pose_wh_ratio > sample_wh_ratio:
+            resized_ori_w = args.image_height * pose_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fx = resized_ori_w * cam_param.fx / args.image_width
+        else:
+            resized_ori_h = args.image_width / pose_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fy = resized_ori_h * cam_param.fy / args.image_height
+        intrinsic = np.asarray([[cam_param.fx * args.image_width,
+                                cam_param.fy * args.image_height,
+                                cam_param.cx * args.image_width,
+                                cam_param.cy * args.image_height]
+                                for cam_param in cam_params], dtype=np.float32)
+
+        K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
+        K = K[:, :14]
+        c2ws = get_relative_pose(cam_params)
+        c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
+        c2ws = c2ws[:,:14]
+        
+    
+        plucker_embedding = ray_condition(K, c2ws, args.image_height, args.image_width, device='cpu')       # b f h w 6
+        plucker_embedding = plucker_embedding.permute(0, 1, 4, 2, 3).contiguous().to(device=device)
+
+        generator = torch.Generator(device=device)
+        generator.manual_seed(42)
+
         with torch.no_grad():
             sample = pipeline(
                 image=condition_image,
@@ -218,9 +236,67 @@ def main(args):
                 generator=generator,
                 output_type='pt'
             ).frames[0].transpose(0, 1).cpu()      # [3, f, h, w] 0-1
-        resized_condition_image = condition_image.resize((args.image_width, args.image_height))
-        save_videos_grid(sample[None], f"{os.path.join(args.out_root, 'generated_videos')}/{save_name}.mp4", rescale=False)
-        resized_condition_image.save(os.path.join(args.out_root, 'reference_images', f'{save_name}.png'))
+        
+        save_name = "_".join(caption.split(" ")) + '_pose1_'
+        save_name = save_name.replace(',', '')
+        save_videos_grid(sample[None], f"{video_pth}/{listdir}_{save_name}.mp4")
+        save_videos_jpg(sample[None], f"{image_pth}", f"{listdir}_{save_name}")
+
+        # Target pose 2
+        print('Loading Target Pose 2 K, R, t matrix')
+        target_pose2 = '{}/target_poses2.txt'.format(filedir)
+        with open(target_pose2, 'r') as f:
+            poses = f.readlines()
+        poses = [pose.strip().split(' ') for pose in poses[1:]]
+
+        cam_params = [[float(x) for x in pose] for pose in poses]
+        cam_params = [Camera(cam_param) for cam_param in cam_params]
+        sample_wh_ratio = args.image_width / args.image_height
+        pose_wh_ratio = args.original_pose_width / args.original_pose_height
+        if pose_wh_ratio > sample_wh_ratio:
+            resized_ori_w = args.image_height * pose_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fx = resized_ori_w * cam_param.fx / args.image_width
+        else:
+            resized_ori_h = args.image_width / pose_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fy = resized_ori_h * cam_param.fy / args.image_height
+        intrinsic = np.asarray([[cam_param.fx * args.image_width,
+                                cam_param.fy * args.image_height,
+                                cam_param.cx * args.image_width,
+                                cam_param.cy * args.image_height]
+                                for cam_param in cam_params], dtype=np.float32)
+
+        K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
+        K = K[:, :14]
+        c2ws = get_relative_pose(cam_params)
+        c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
+        c2ws = c2ws[:,:14]
+
+        plucker_embedding = ray_condition(K, c2ws, args.image_height, args.image_width, device='cpu')       # b f h w 6
+        plucker_embedding = plucker_embedding.permute(0, 1, 4, 2, 3).contiguous().to(device=device)
+
+        generator = torch.Generator(device=device)
+        generator.manual_seed(42)
+    
+        with torch.no_grad():
+            sample = pipeline(
+                image=condition_image,
+                pose_embedding=plucker_embedding,
+                height=args.image_height,
+                width=args.image_width,
+                num_frames=args.num_frames,
+                num_inference_steps=args.num_inference_steps,
+                min_guidance_scale=args.min_guidance_scale,
+                max_guidance_scale=args.max_guidance_scale,
+                do_image_process=True,
+                generator=generator,
+                output_type='pt'
+            ).frames[0].transpose(0, 1).cpu() 
+        save_name = "_".join(caption.split(" ")) + '_pose2_'
+        save_name = save_name.replace(',', '')
+        save_videos_grid(sample[None], f"{video_pth}/{listdir}_{save_name}.mp4")
+        save_videos_jpg(sample[None], f"{image_pth}", f"{listdir}_{save_name}")
 
 
 if __name__ == '__main__':
@@ -236,12 +312,14 @@ if __name__ == '__main__':
     parser.add_argument("--num_inference_steps", type=int, default=25)
     parser.add_argument("--min_guidance_scale", type=float, default=1.0)
     parser.add_argument("--max_guidance_scale", type=float, default=3.0)
-    parser.add_argument("--prompt_file", required=True, help='prompts path, json or txt')
-    parser.add_argument("--trajectory_file", required=True)
+    #parser.add_argument("--prompt_file", required=True, help='prompts path, json or txt')
+    #parser.add_argument("--trajectory_file", required=True)
     parser.add_argument("--original_pose_width", type=int, default=1280)
     parser.add_argument("--original_pose_height", type=int, default=720)
     parser.add_argument("--model_config", required=True)
     parser.add_argument("--n_procs", type=int, default=8)
+
+    parser.add_argument("--eval_datadir", type=str)
 
     # DDP args
     parser.add_argument("--world_size", default=1, type=int,

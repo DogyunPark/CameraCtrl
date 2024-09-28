@@ -32,7 +32,18 @@ def get_obj_from_str(string, reload=False):
         importlib.reload(module_imp)
     return getattr(importlib.import_module(module, package=None), cls)
 
-
+def save_videos_jpg(videos: torch.Tensor, path: str, frame_path: str, rescale=False, n_rows=6, fps=8):
+    videos = rearrange(videos, "b t c h w -> t b c h w")
+    outputs = []
+    for f, x in enumerate(videos):
+        x = torchvision.utils.make_grid(x, nrow=n_rows)
+        x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        if rescale:
+            x = (x + 1.0) / 2.0  # -1,1 -> 0,1
+        x = Image.fromarray((x * 255).numpy().astype(np.uint8))
+        frame_name = frame_path + 'frame' + '{0:04d}.jpg'.format(f)
+        x.save('{}/{}'.format(path, frame_name))
+        
 def save_videos_grid(videos: torch.Tensor, path: str, rescale=False, n_rows=6, fps=8):
     videos = rearrange(videos, "b c t h w -> t b c h w")
     outputs = []
