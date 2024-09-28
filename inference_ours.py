@@ -210,7 +210,7 @@ def main(args):
     print('Done')
 
     eval_listdir = [x for x in os.listdir(args.eval_datadir)]
-    filtered_eval_listdir = eval_listdir[:1000]
+    filtered_eval_listdir = eval_listdir[750:]
 
     for idx, listdir in tqdm(enumerate(filtered_eval_listdir)):
         filedir = '{}/{}'.format(args.eval_datadir, listdir)
@@ -280,8 +280,8 @@ def main(args):
         ).videos  # [1, 3, f, h, w]
         save_name = "_".join(caption.split(" ")) + '_pose1_'
         save_name = save_name.replace(',', '')
-        save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
-        save_videos_jpg(sample, f"{image_pth}", save_name)
+        save_videos_grid(sample, f"{video_pth}/{listdir}_{save_name}.mp4")
+        save_videos_jpg(sample, f"{image_pth}", f"{listdir}_{save_name}")
 
         # Target pose 2
         print('Loading Target Pose 2 K, R, t matrix')
@@ -328,8 +328,8 @@ def main(args):
         ).videos  # [1, 3, f, h, w]
         save_name = "_".join(caption.split(" ")) + '_pose2_'
         save_name = save_name.replace(',', '')
-        save_videos_grid(sample, f"{video_pth}/{save_name}.mp4")
-        save_videos_jpg(sample, f"{image_pth}", save_name)
+        save_videos_grid(sample, f"{video_pth}/{listdir}_{save_name}.mp4")
+        save_videos_jpg(sample, f"{image_pth}", f"{listdir}_{save_name}")
 
 
 if __name__ == '__main__':
